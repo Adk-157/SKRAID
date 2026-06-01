@@ -81,7 +81,7 @@ speed_norm   = speed_kmh / 60.0   [clipped 0–1]
 - IMU/Gyro features → **per-session** min-max (hardware mounting bias makes global unfair; ACCEL_Z_VAR ranges 0.00006–17585 across sessions)
 - Sessions with no IMU data → `R_skid_base = V_vision` directly (`has_imu = (TERM_IMU > 0) | (TERM_GYRO > 0)`, no-IMU windows rescaled to full [0,1])
 
-**Vision term features:** `WETNESS_RATIO`, `EDGE_DENSITY_MEAN`, `TEXTURE_ROUGHNESS` (averaged un-weighted, then global min-max). `BRIGHTNESS_VARIANCE` and `MUD_SCORE` are computed and stored as columns for analysis but are **excluded from the score**: `BRIGHTNESS_VARIANCE` is raw pixel variance (range ~0–1644) and would dominate the un-weighted mean, collapsing the global normalization. Optical flow is excluded too — see design notes.
+**Vision term features:** `WETNESS_RATIO`, `EDGE_DENSITY_MEAN`, `TEXTURE_ROUGHNESS`, `BV_NORM`, `MUD_SCORE` — all five averaged un-weighted, then global min-max normalized. `BRIGHTNESS_VARIANCE` is raw pixel variance (range ~0–1644) and is normalised to [0,1] (`BV_NORM = BV / global_max`) before entering the mean so it does not dominate the un-weighted average. `MUD_SCORE` is already bounded [0,1]. Optical flow is excluded — see design notes.
 
 ---
 

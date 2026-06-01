@@ -1,0 +1,55 @@
+# ─── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# ─── Jupyter ──────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ─── SKRAID: Raw Sensor Data — NEVER push to GitHub ──────────
+# Raw data belongs on Google Drive, not in the repo.
+# Drive: https://drive.google.com/drive/folders/1Eg5fG3X_Rem8uqQID1Pa-6Fy4AsNK00O
+
+data_collection/
+*.avi
+*.mp4
+fusion_*.csv
+gps_frame_manifest_*.csv
+video_features/
+label_helpers/
+frames/
+extracted_frames/
+
+# ─── Analysis Outputs ─────────────────────────────────────────
+*.pkl
+*.h5
+*.hdf5
+risk_scores*.csv
+heatmap*.html
+
+# ─── Figures / Plots (large) ──────────────────────────────────
+# Keep small representative figures in docs/figures/
+# Exclude large auto-generated plots
+colab/figures/
+*.png~
+
+# ─── OS / Editor ──────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── Secrets ──────────────────────────────────────────────────
+*.env
+secrets.py
+config_local.py

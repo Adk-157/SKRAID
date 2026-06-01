@@ -1,0 +1,9 @@
+# SKRAID — Raspberry Pi Dependencies
+# Install with: pip install -r requirements.txt
+
+pyserial>=3.5       # Serial comms with IMU (/dev/ttyUSB0) and GPS (/dev/serial0)
+pynmea2>=1.18.0     # NMEA sentence parser for LC76G GPS HAT
+
+# System dependencies (install with apt, not pip):
+#   sudo apt install ffmpeg          ← required for video capture
+#   ffmpeg owns /dev/video0 exclusively during recording

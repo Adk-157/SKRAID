@@ -77,11 +77,21 @@ speed_norm   = speed_kmh / 60.0   [clipped 0–1]
 > **Speed multiplier & motion gate are currently disabled** pending confirmation of the Haversine-derived speed (Cell 9). Until then `R_skid_final = R_skid_base.clip(0, 1)` — no speed weighting and no low-speed cap are applied.
 
 **Normalization:**
-- Vision features → **global** min-max (dry session 0.42 vs muddy 8.14 must be compared globally)
+- Vision term → **independent hazard sub-scores**, each percentile-scaled to [0,1] globally (see below), combined by worst-case. Already 0–1, so no further global min-max is applied.
 - IMU/Gyro features → **per-session** min-max (hardware mounting bias makes global unfair; ACCEL_Z_VAR ranges 0.00006–17585 across sessions)
 - Sessions with no IMU data → `R_skid_base = V_vision` directly (`has_imu = (TERM_IMU > 0) | (TERM_GYRO > 0)`, no-IMU windows rescaled to full [0,1])
 
-**Vision term features:** `WETNESS_RATIO`, `EDGE_DENSITY_MEAN`, `TEXTURE_ROUGHNESS`, `BV_NORM`, `MUD_SCORE` — all five averaged un-weighted, then global min-max normalized. `BRIGHTNESS_VARIANCE` is raw pixel variance (range ~0–1644) and is normalised to [0,1] (`BV_NORM = BV / global_max`) before entering the mean so it does not dominate the un-weighted average. `MUD_SCORE` is already bounded [0,1]. Optical flow is excluded — see design notes.
+**Vision term — independent hazard sub-scores (`V_vision = max(wet, rough, mud)`):**
+
+Road risk is **U-shaped in surface texture**: both an *abnormally smooth* surface (a water film fills the micro-texture and mirrors light) and a *very rough* surface (gravel, potholes, broken tar) are dangerous, while medium texture is a safe sealed road. A single averaged vision term cannot represent this — raising the score for "rough" lowers it for "wet" and vice-versa. So each hazard is scored **separately** and the worst one wins. Each sub-score reads ~0 on a normal road and rises only for a genuine hazard, using robust global-percentile pivots (outlier-proof, no hand-tuned pixel thresholds):
+
+| Sub-score | Fires on | Signal |
+|-----------|----------|--------|
+| `wet`   | water film / wet asphalt | `WETNESS_TEXTURE`/`WET_INDICATOR` (primary), or a multiplicative smoothness + low-chroma composite as fallback |
+| `rough` | gravel / potholes        | high `TEXTURE_ROUGHNESS` **or** `EDGE_DENSITY_MEAN` |
+| `mud`   | loose wet mud            | high `MUD_SCORE` (mud-masked pixel fraction) |
+
+> **`WETNESS_RATIO` (HSV-threshold) is deliberately NOT used.** On this dataset it correlates **−0.79** with truly wet roads: it keys on *brightness*, so bright/over-exposed **dry** roads read "wet" (~0.9) while dark, genuinely **wet** asphalt reads "dry" (~0.04). This inversion is what previously scored a wet road as Safe. Optical flow is excluded too — see design notes.
 
 ---
 
@@ -161,34 +171,32 @@ The canonical pipeline is **`colab/honours_fixed.ipynb`** (13 cells, 0–12):
 | Cell 7 | pip install (opencv, pandas, numpy, tqdm, folium) |
 | Cell 8 | Vision feature extraction per frame — grey-world white balance, `mud_score` (s<220), edge, HSV, texture |
 | Cell 9 | IMU feature extraction per 2s window + **Haversine** GPS-speed derivation |
-| Cell 10 | Merger — vision + IMU → label_helpers, with `recompute_wetness()` applied before aggregation + `brightness_variance`/`mud_score` passthrough |
-| Cell 11 | R_skid computation + GPS heatmap + save dataset |
+| Cell 10 | Merger — vision + IMU → label_helpers (passes texture/edge/mud/wetness columns through to the scorer) |
+| Cell 11 | R_skid computation (vision = `max(wet, rough, mud)` hazard sub-scores) + GPS heatmap + save dataset |
 | Cell 12 | Analysis report + figures |
 
 ---
 
 ## Current Results
 
-Latest pipeline run (post wetness-fix, speed multiplier disabled) over all 33 sessions / 6,710 windows:
+Latest pipeline run (hazard sub-score vision term, speed multiplier disabled) over all 37 sessions / 7,442 windows:
 
-| Risk class | Windows | Share |
-|------------|---------|-------|
-| 🟢 Safe | 4,998 | 74.5% |
-| 🟡 Caution | 1,671 | 24.9% |
-| 🔴 High Risk | 41 | 0.6% |
+| Risk class | Share |
+|------------|-------|
+| 🟢 Safe | 73.2% |
+| 🟡 Caution | 22.9% |
+| 🔴 High Risk | 3.9% |
 
-| Statistic | Value |
-|-----------|-------|
-| Mean R_skid | 0.261 |
-| Max R_skid | 1.000 |
-| Std R_skid | 0.133 |
-| Mean term — Vision | 0.271 |
-| Mean term — IMU | 0.057 |
-| Mean term — Gyro | 0.030 |
-| Windows with IMU | 1,801 (Jan 2026 + Apr/May 2026) |
-| Windows without IMU | 4,909 (all 2025 sessions) |
+**Validation against held-out surface types** (the whole point of the hazard-sub-score redesign):
 
-> These numbers reflect the wetness-corrected run; they shift if the vision features are re-extracted or the speed multiplier is re-enabled.
+| Surface | Safe | Caution | High | Verdict |
+|---------|------|---------|------|---------|
+| Normal dry road | 78% | 18% | 4% | ✅ mostly Safe |
+| **Wet road** (Jun 2026) | 32% | **65%** | 2% | ✅ now Caution (was wrongly Safe) |
+| Wet mud | 0% | 29% | 71% | ✅ Caution / High |
+| Dry gravel | 12% | 29% | 58% | ✅ Caution / High |
+
+> The previous averaged-feature term scored genuinely wet roads as **Safe** (because `WETNESS_RATIO` is brightness-driven and inverted). The hazard sub-score term fixes this *without* flattening dry roads — normal road stays Safe while all three hazard types (wet film, mud, gravel) are correctly elevated. Numbers shift if vision features are re-extracted or the speed multiplier is re-enabled.
 
 ---
 
@@ -235,8 +243,8 @@ On a two-wheeler the camera suffers vibration/shake; optical flow in this setup 
 
 **Camera mount:** newer sessions use a **forward-pitch (dashcam-style)** mount — compatible with the RSCD reference dataset. Older sessions used a steeper downward angle, which is why those need per-session ROI crops (see the vision cell's ROI table).
 
-**The wetness fix lives in the merger (Cell 10), not the vision cell.**  
-The per-frame `wetness_ratio` from Cell 8 used loose HSV thresholds (`wet_tar s<50 v>120`) that flagged dry Indian concrete (saturation 8–25, value 130–150) as wet — wetness read 0.70–0.90 everywhere. `recompute_wetness()` re-derives it with tightened thresholds (`wet_tar s<30 v>180`, `wet_water s<15 v>200`, `wet_mud h:10–40 s:40–220 v:80–210`) **before** windowing, so Cell 8 does not need re-extraction. Three early high-glare sessions remain elevated — a documented limitation of passive monocular vision, not a bug.
+**Why HSV-threshold wetness was abandoned for hazard sub-scores.**  
+The per-frame `wetness_ratio` (any HSV value/saturation threshold) is fundamentally brightness-driven: wet asphalt is *dark* (value ~135) but the thresholds fire on *bright* surfaces, so over-exposed dry roads (value 200–230) score as "wet" while genuinely wet roads score as "dry". Measured against a held-out wet session, `WETNESS_RATIO` correlated **−0.79** with actual wetness — it was actively inverted. No threshold tuning fixes a sign error. The vision term (Cell 11) was therefore rebuilt around **independent, correctly-signed hazard sub-scores** (`wet` = abnormally smooth + low-chroma; `rough` = high texture/edge; `mud` = mud-mask fraction), combined worst-case. This is what finally separates wet, mud, gravel, and normal dry surfaces simultaneously. The clean wet signal is `WETNESS_TEXTURE` (dry-road median ~0.001 vs wet ~0.39); a smoothness composite is the fallback when that column is absent.
 
 ---
 

@@ -1,9 +1,34 @@
 # SKRAID — Raspberry Pi Dependencies
-# Install with: pip install -r requirements.txt
+# Install with: pip install -r requirements.txt --break-system-packages
+#
+# NOTE: Raspberry Pi OS (Bookworm+) marks the system Python as
+# externally-managed (PEP 668), so plain `pip install` is blocked.
+# Use --break-system-packages, or create a venv.
 
-pyserial>=3.5       # Serial comms with IMU (/dev/ttyUSB0) and GPS (/dev/serial0)
-pynmea2>=1.18.0     # NMEA sentence parser for LC76G GPS HAT
+# ---- Data collection (collect_data.py) ----
+pyserial>=3.5           # Serial comms with IMU (/dev/ttyUSB0) and GPS (/dev/serial0)
+pynmea2>=1.18.0         # NMEA sentence parser for LC76G GPS HAT
 
-# System dependencies (install with apt, not pip):
-#   sudo apt install ffmpeg          ← required for video capture
-#   ffmpeg owns /dev/video0 exclusively during recording
+# ---- Inference / deployment (live_deploy_skraid.py, benchmark_skraid_pi4.py) ----
+numpy>=1.24
+pandas>=2.0
+opencv-python>=4.8      # vision feature extraction (flow, Canny/Sobel, HSV/LAB, texture)
+joblib>=1.3             # loading rf_model.joblib / scaler.joblib
+
+# ---- Model ----
+# PIN THIS. The shipped rf_model.joblib was pickled with scikit-learn 1.6.1.
+# Loading it under a different minor version raises InconsistentVersionWarning
+# and can silently change predictions -- internal tree representations are not
+# guaranteed stable across versions. A mismatch does NOT crash; it quietly
+# produces numbers that differ from the validated results, which is worse.
+# If you re-train, re-pin this to whatever version you trained under.
+scikit-learn==1.6.1
+
+# ---- System dependencies (apt, not pip) ----
+#   sudo apt install ffmpeg
+#     ffmpeg owns /dev/video0 exclusively during recording.
+#
+# ---- Optional ----
+#   RPi.GPIO is preinstalled on Raspberry Pi OS. Only needed when running
+#   live_deploy_skraid.py with --gpio (buzzer/LED warning output).
+#   The script degrades gracefully to log-only if it is unavailable.

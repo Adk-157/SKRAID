@@ -1,0 +1,1168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>SKRAID — Skid Risk Intelligence for Indian Roads</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="sriad_points.js"></script>
+<script src="frame_manifest.js"></script>
+<style>
+  :root{
+    --bg: #080C18;
+    --bg-2: #0C1224;
+    --panel: #0F1730;
+    --panel-2: #131C3A;
+    --line: #1C2647;
+    --line-2: #243160;
+    --text: #E6ECFF;
+    --muted: #64748B;
+    --muted-2: #8895B3;
+    --safe: #22C55E;
+    --caution: #F59E0B;
+    --risk: #EF4444;
+    --accent: #3B82F6;
+    --accent-2: #60A5FA;
+    --cyan: #22D3EE;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:'DM Sans',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(59,130,246,.10), transparent 60%),
+      radial-gradient(900px 500px at -10% 30%, rgba(34,211,238,.06), transparent 60%),
+      linear-gradient(180deg, #060A14 0%, #080C18 40%, #0A0F1E 100%);
+    min-height:100vh;
+  }
+  /* scanline + grid overlay */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:1;
+    background:
+      repeating-linear-gradient(0deg, rgba(255,255,255,.014) 0, rgba(255,255,255,.014) 1px, transparent 1px, transparent 3px),
+      linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px) 0 0/48px 48px,
+      linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px) 0 0/48px 48px;
+    mask-image: radial-gradient(ellipse at center, black 50%, transparent 95%);
+  }
+  .shell{position:relative; z-index:2; max-width:1480px; margin:0 auto; padding:24px 28px 64px}
+
+  /* =================== HEADER =================== */
+  .topbar{display:flex; align-items:center; gap:18px; padding:14px 0 18px; border-bottom:1px solid var(--line); position:relative}
+  .topbar::after{content:""; position:absolute; left:0; right:0; bottom:-1px; height:1px; background:linear-gradient(90deg, transparent, var(--accent), transparent); opacity:.4}
+  .logo{
+    width:46px;height:46px;border-radius:10px;
+    background: linear-gradient(135deg, #1A2752, #0D1530);
+    border:1px solid var(--line-2);
+    display:grid; place-items:center; position:relative; flex-shrink:0;
+    box-shadow: inset 0 0 0 1px rgba(96,165,250,.15), 0 0 24px rgba(59,130,246,.25);
+  }
+  .logo svg{width:24px;height:24px}
+  .brand{display:flex; flex-direction:column; gap:2px; min-width:0}
+  .brand .name{font-family:'Space Mono',monospace; font-weight:700; font-size:22px; letter-spacing:.18em; color:var(--text)}
+  .brand .name span{color:var(--accent-2)}
+  .brand .tagline{font-size:12.5px; color:var(--muted-2); letter-spacing:.04em}
+  .topstats{margin-left:auto; display:flex; gap:14px; flex-wrap:wrap}
+  .pill{
+    display:flex; flex-direction:column; gap:2px; padding:8px 14px; border-radius:8px;
+    background: linear-gradient(180deg, rgba(15,23,48,.9), rgba(13,20,42,.7));
+    border:1px solid var(--line); min-width:90px;
+  }
+  .pill .k{font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.14em; font-family:'Space Mono',monospace}
+  .pill .v{font-family:'Space Mono',monospace; font-weight:700; font-size:16px; color:var(--text)}
+
+  .weather-pill{
+    display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:10px;
+    background: linear-gradient(135deg, rgba(59,130,246,.12), rgba(34,211,238,.06));
+    border:1px solid rgba(96,165,250,.3);
+    min-width:200px;
+  }
+  .weather-pill .dot{width:8px;height:8px;border-radius:50%; background:var(--cyan); box-shadow:0 0 12px var(--cyan); animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .weather-pill .wt{font-family:'Space Mono',monospace; font-size:11px; color:var(--muted-2); letter-spacing:.1em; text-transform:uppercase}
+  .weather-pill .wv{font-family:'Space Mono',monospace; font-weight:700; font-size:14px}
+  .weather-pill .wd{font-size:11px; color:var(--muted-2); margin-top:1px}
+
+  /* =================== SECTION =================== */
+  section{margin-top:34px}
+  .section-head{display:flex; align-items:baseline; gap:14px; margin-bottom:14px}
+  .section-head .num{font-family:'Space Mono',monospace; font-size:11px; color:var(--accent); letter-spacing:.2em; padding:3px 8px; border:1px solid rgba(96,165,250,.3); border-radius:4px; background:rgba(59,130,246,.06)}
+  .section-head h2{margin:0; font-size:18px; font-weight:600; letter-spacing:.04em}
+  .section-head .sub{margin-left:auto; font-size:12px; color:var(--muted); font-family:'Space Mono',monospace; letter-spacing:.1em; text-transform:uppercase}
+
+  /* =================== HERO STATS =================== */
+  .hero-grid{display:grid; grid-template-columns:repeat(6,1fr); gap:14px}
+  .stat-card{
+    position:relative; padding:18px 18px 16px; border-radius:12px;
+    background: linear-gradient(180deg, rgba(15,23,48,.92), rgba(11,17,36,.7));
+    border:1px solid var(--line); overflow:hidden;
+  }
+  .stat-card::before{
+    content:""; position:absolute; top:0; left:0; right:0; height:1px;
+    background:linear-gradient(90deg, transparent, var(--accent), transparent); opacity:.5;
+  }
+  .stat-card .lbl{font-family:'Space Mono',monospace; font-size:10px; color:var(--muted); letter-spacing:.16em; text-transform:uppercase; margin-bottom:10px}
+  .stat-card .val{font-family:'Space Mono',monospace; font-size:30px; font-weight:700; line-height:1}
+  .stat-card .delta{font-family:'Space Mono',monospace; font-size:11px; color:var(--muted-2); margin-top:8px; letter-spacing:.06em}
+  .stat-card.safe .val{color:var(--safe)}
+  .stat-card.caution .val{color:var(--caution)}
+  .stat-card.risk .val{color:var(--risk)}
+  .stat-card .corner{position:absolute; top:10px; right:12px; font-family:'Space Mono',monospace; font-size:10px; color:var(--muted); letter-spacing:.1em}
+
+  /* ====== LOCAL FRAMES LOADER ====== */
+  .load-frames-bar{
+    display:flex; align-items:center; gap:12px; padding:12px 16px; border-radius:10px;
+    background:linear-gradient(135deg, rgba(59,130,246,.10), rgba(34,211,238,.05));
+    border:1px solid rgba(96,165,250,.25); margin-bottom:14px; flex-wrap:wrap;
+  }
+  .lf-btn{
+    display:inline-flex; align-items:center; gap:8px; padding:8px 16px; border-radius:7px;
+    background:linear-gradient(135deg,#1A2A52,#0F1B3A); border:1px solid rgba(96,165,250,.4);
+    color:var(--text); font-family:'Space Mono',monospace; font-size:12px; letter-spacing:.1em;
+    cursor:pointer; transition:.2s; flex-shrink:0;
+  }
+  .lf-btn:hover{background:linear-gradient(135deg,#243462,#1A2A52); border-color:var(--accent-2)}
+  .lf-status{font-family:'Space Mono',monospace; font-size:11px; color:var(--muted-2); flex:1; min-width:0}
+  .lf-count{font-family:'Space Mono',monospace; font-size:11px; color:var(--cyan)}
+
+  /* =================== MAP =================== */
+  .map-wrap{
+    position:relative; border-radius:14px; overflow:hidden;
+    border:1px solid var(--line-2); background:#000;
+    box-shadow: 0 0 0 1px rgba(96,165,250,.08), 0 30px 80px -40px rgba(59,130,246,.25);
+  }
+  #map{height:560px; width:100%; background:#0A0F1E; filter:saturate(1.05)}
+  .map-overlay{
+    position:absolute; top:14px; left:14px; z-index:500; display:flex; flex-direction:column; gap:8px;
+    pointer-events:none;
+  }
+  .map-chip{
+    display:inline-flex; align-items:center; gap:8px; padding:6px 11px; border-radius:6px;
+    background:rgba(8,12,24,.85); border:1px solid var(--line-2); backdrop-filter: blur(6px);
+    font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.08em; color:var(--text);
+  }
+  .map-chip .ico{width:8px;height:8px;border-radius:50%}
+  .map-legend{
+    position:absolute; bottom:14px; right:14px; z-index:500;
+    background:rgba(8,12,24,.9); border:1px solid var(--line-2); border-radius:8px; padding:12px 14px;
+    backdrop-filter:blur(6px);
+  }
+  .map-legend .ttl{font-family:'Space Mono',monospace; font-size:10px; color:var(--muted); letter-spacing:.16em; text-transform:uppercase; margin-bottom:8px}
+  .map-legend .row{display:flex; align-items:center; gap:8px; font-family:'Space Mono',monospace; font-size:11px; margin:3px 0}
+  .map-legend .sw{width:24px; height:8px; border-radius:2px}
+  .layer-toggle{
+    position:absolute; bottom:14px; left:14px; z-index:500; display:flex; gap:6px;
+    background:rgba(8,12,24,.9); border:1px solid var(--line-2); border-radius:8px; padding:5px;
+    backdrop-filter:blur(6px);
+  }
+  .lt-btn{
+    font-family:'Space Mono',monospace; font-size:10.5px; letter-spacing:.05em; color:var(--muted);
+    background:transparent; border:1px solid transparent; border-radius:6px; padding:6px 10px;
+    cursor:pointer; transition:all .15s ease; white-space:nowrap;
+  }
+  .lt-btn:hover{ color:var(--text); }
+  .lt-btn.active{ color:var(--text); background:rgba(96,165,250,.12); border-color:var(--line-2); }
+  .crosshair{
+    position:absolute; top:14px; right:14px; z-index:500;
+    font-family:'Space Mono',monospace; font-size:10px; color:var(--muted); letter-spacing:.1em;
+    background:rgba(8,12,24,.85); border:1px solid var(--line-2); border-radius:6px; padding:6px 10px;
+    backdrop-filter:blur(6px);
+  }
+  .crosshair span{color:var(--cyan)}
+
+  /* Leaflet popup override */
+  .leaflet-popup-content-wrapper{
+    background:#0A1224; color:var(--text); border:1px solid var(--line-2);
+    border-radius:10px; padding:0; box-shadow: 0 20px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(96,165,250,.1);
+  }
+  .leaflet-popup-content{margin:0; width:300px !important}
+  .leaflet-popup-tip{background:#0A1224; border:1px solid var(--line-2)}
+  .leaflet-popup-close-button{color:var(--muted) !important; right:8px !important; top:8px !important; font-size:18px !important}
+  .pp{padding:0}
+  .pp .img{
+    width:100%; height:150px; object-fit:cover; display:block;
+    border-bottom:1px solid var(--line-2);
+    background:#000;
+  }
+  .pp .body{padding:12px 14px 14px}
+  .pp .top{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px}
+  .pp .surf{font-family:'Space Mono',monospace; font-size:11px; color:var(--muted-2); letter-spacing:.12em; text-transform:uppercase}
+  .pp .badge{font-family:'Space Mono',monospace; font-size:11px; font-weight:700; padding:3px 8px; border-radius:4px; letter-spacing:.06em}
+  .pp .badge.safe{background:rgba(34,197,94,.15); color:var(--safe); border:1px solid rgba(34,197,94,.4)}
+  .pp .badge.caution{background:rgba(245,158,11,.15); color:var(--caution); border:1px solid rgba(245,158,11,.4)}
+  .pp .badge.risk{background:rgba(239,68,68,.15); color:var(--risk); border:1px solid rgba(239,68,68,.4)}
+  .pp .grid{display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; margin:8px 0 4px}
+  .pp .grid .k{font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.1em; font-family:'Space Mono',monospace}
+  .pp .grid .v{font-family:'Space Mono',monospace; font-size:13px; color:var(--text); margin-top:1px}
+  .pp .note{margin-top:10px; padding-top:10px; border-top:1px dashed var(--line-2); font-size:11px; color:var(--muted-2); line-height:1.4}
+
+  /* =================== ANALYTICS =================== */
+  .ana-grid{display:grid; grid-template-columns: 1.1fr 1.5fr; gap:18px}
+  .panel{
+    background: linear-gradient(180deg, rgba(15,23,48,.85), rgba(11,17,36,.6));
+    border:1px solid var(--line); border-radius:12px; padding:18px 20px;
+  }
+  .panel h3{margin:0 0 12px; font-size:13px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:var(--muted-2); font-family:'Space Mono',monospace}
+  .charts{display:grid; grid-template-rows: auto auto; gap:18px}
+  .donut-wrap{display:flex; align-items:center; gap:18px}
+  .donut-canvas{position:relative; width:200px; height:200px; flex-shrink:0}
+  #donut{position:absolute; inset:0}
+  .donut-center{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none}
+  .donut-center .big{font-family:'Space Mono',monospace; font-size:30px; font-weight:700}
+  .donut-center .small{font-family:'Space Mono',monospace; font-size:10px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; margin-top:2px}
+  .donut-legend{display:flex; flex-direction:column; gap:12px; flex:1; min-width:0}
+  .leg-row{display:flex; align-items:center; gap:10px}
+  .leg-row .sq{width:10px;height:10px;border-radius:2px; flex-shrink:0}
+  .leg-row .lbl{font-size:13px; flex:1}
+  .leg-row .pct{font-family:'Space Mono',monospace; font-weight:700; font-size:15px}
+  .leg-row .cnt{font-family:'Space Mono',monospace; font-size:11px; color:var(--muted); margin-left:8px}
+
+  .bar-row{display:flex; align-items:center; gap:12px; margin:10px 0}
+  .bar-row .lbl{width:80px; font-size:12px; color:var(--muted-2); font-family:'Space Mono',monospace; letter-spacing:.06em}
+  .bar-row .track{flex:1; height:8px; background:var(--bg-2); border-radius:4px; overflow:hidden; border:1px solid var(--line)}
+  .bar-row .fill{height:100%; border-radius:4px}
+  .bar-row .v{width:60px; text-align:right; font-family:'Space Mono',monospace; font-size:12px; font-weight:700}
+
+  /* Sessions table */
+  .ses-table{width:100%; border-collapse:collapse; font-family:'Space Mono',monospace; font-size:12px}
+  .ses-table thead th{
+    text-align:left; padding:10px 8px; font-size:10px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; font-weight:400;
+    border-bottom:1px solid var(--line-2);
+    position:sticky; top:0; background:var(--panel);
+  }
+  .ses-table tbody td{padding:9px 8px; border-bottom:1px solid var(--line); color:var(--text)}
+  .ses-table tbody tr:hover{background:rgba(59,130,246,.04)}
+  .ses-table td.sid{color:var(--accent-2)}
+  .ses-table .mini-bar{display:inline-flex; height:6px; width:80px; background:var(--bg-2); border-radius:3px; overflow:hidden; vertical-align:middle; border:1px solid var(--line)}
+  .ses-table .mini-bar span{height:100%}
+  .ses-table .tag{display:inline-block; padding:2px 6px; border-radius:3px; font-size:10px; letter-spacing:.06em}
+  .ses-table .tag.hot{background:rgba(239,68,68,.15); color:var(--risk); border:1px solid rgba(239,68,68,.3)}
+  .ses-table .tag.wet{background:rgba(245,158,11,.15); color:var(--caution); border:1px solid rgba(245,158,11,.3)}
+  .scroll{max-height:540px; overflow-y:auto}
+  .scroll::-webkit-scrollbar{width:8px}
+  .scroll::-webkit-scrollbar-track{background:transparent}
+  .scroll::-webkit-scrollbar-thumb{background:var(--line-2); border-radius:4px}
+
+  /* =================== WEATHER PANEL =================== */
+  .wx-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:14px}
+  .wx-card{
+    position:relative; padding:18px 20px; border-radius:12px;
+    background: linear-gradient(180deg, rgba(15,23,48,.85), rgba(11,17,36,.6));
+    border:1px solid var(--line); overflow:hidden;
+    transition: all .25s;
+  }
+  .wx-card.active{
+    border-color: rgba(96,165,250,.5);
+    background: linear-gradient(180deg, rgba(59,130,246,.10), rgba(15,23,48,.85));
+    box-shadow: 0 0 0 1px rgba(96,165,250,.25), 0 0 40px rgba(59,130,246,.15);
+  }
+  .wx-card .wico{width:36px; height:36px; margin-bottom:12px; color:var(--accent-2)}
+  .wx-card .wn{font-size:14px; font-weight:600; letter-spacing:.06em}
+  .wx-card .wmul{font-family:'Space Mono',monospace; font-size:26px; font-weight:700; margin-top:8px; color:var(--accent-2)}
+  .wx-card .wdesc{font-size:11px; color:var(--muted); margin-top:6px; line-height:1.4}
+  .wx-card .active-tag{position:absolute; top:12px; right:12px; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.16em; padding:3px 7px; border-radius:3px; background:rgba(34,211,238,.15); color:var(--cyan); border:1px solid rgba(34,211,238,.3); display:none}
+  .wx-card.active .active-tag{display:inline-block}
+
+  /* =================== FORMULA =================== */
+  .formula{
+    background:linear-gradient(180deg, #060912 0%, #0A0F1E 100%);
+    border:1px solid var(--line-2); border-radius:12px; padding:24px 26px;
+    font-family:'Space Mono',monospace;
+    position:relative; overflow:hidden;
+  }
+  .formula::before{
+    content:""; position:absolute; inset:0;
+    background: repeating-linear-gradient(0deg, transparent 0, transparent 23px, rgba(96,165,250,.04) 23px, rgba(96,165,250,.04) 24px);
+    pointer-events:none;
+  }
+  .formula .line{position:relative; margin:6px 0; font-size:15px}
+  .formula .line.eq{font-size:17px; margin:14px 0}
+  .formula .var{color:var(--accent-2)}
+  .formula .op{color:var(--muted-2)}
+  .formula .num{color:var(--caution)}
+  .formula .cmt{color:var(--muted); font-size:12px}
+  .formula .thr{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:18px}
+  .formula .thr .t{padding:12px 14px; border:1px solid var(--line); border-radius:8px; background:rgba(15,23,48,.5)}
+  .formula .thr .t.s{border-color:rgba(34,197,94,.3)}
+  .formula .thr .t.c{border-color:rgba(245,158,11,.3)}
+  .formula .thr .t.r{border-color:rgba(239,68,68,.3)}
+  .formula .thr .t .lbl{font-size:11px; letter-spacing:.14em; text-transform:uppercase; margin-bottom:6px}
+  .formula .thr .t.s .lbl{color:var(--safe)}
+  .formula .thr .t.c .lbl{color:var(--caution)}
+  .formula .thr .t.r .lbl{color:var(--risk)}
+  .formula .thr .t .v{font-size:14px; font-weight:700}
+  .formula .vars{margin-top:18px; display:grid; grid-template-columns:1fr 1fr; gap:8px 24px; font-size:12px}
+  .formula .vars div{color:var(--muted-2)}
+  .formula .vars span{color:var(--accent-2)}
+
+  /* =================== FOOTER =================== */
+  footer{margin-top:48px; padding-top:28px; border-top:1px solid var(--line); position:relative}
+  footer::before{content:""; position:absolute; top:-1px; left:0; right:0; height:1px; background:linear-gradient(90deg, transparent, var(--accent), transparent); opacity:.4}
+  .foot-top{display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:24px}
+  .foot-meta{font-family:'Space Mono',monospace; font-size:12px; color:var(--muted); letter-spacing:.04em; line-height:1.8}
+  .foot-meta .strong{color:var(--text)}
+  .foot-meta .line{display:block}
+  .team{display:flex; flex-wrap:wrap; gap:10px}
+  .li-badge{
+    display:inline-flex; align-items:center; gap:10px; padding:8px 14px 8px 10px; border-radius:8px;
+    background: linear-gradient(180deg, rgba(15,23,48,.9), rgba(11,17,36,.7));
+    border:1px solid var(--line-2); text-decoration:none; color:var(--text);
+    transition: all .2s; cursor:pointer;
+  }
+  .li-badge:hover{border-color:#0A66C2; background:linear-gradient(180deg, rgba(10,102,194,.15), rgba(15,23,48,.9)); transform:translateY(-1px)}
+  .li-badge .li-ico{
+    width:24px;height:24px;border-radius:4px; background:#0A66C2; display:grid; place-items:center; flex-shrink:0;
+  }
+  .li-badge .li-ico svg{width:14px;height:14px;fill:#fff}
+  .li-badge .li-txt{display:flex; flex-direction:column; gap:1px; min-width:0}
+  .li-badge .li-name{font-size:13px; font-weight:600; line-height:1.2}
+  .li-badge .li-role{font-family:'Space Mono',monospace; font-size:10px; color:var(--muted); letter-spacing:.1em; text-transform:uppercase}
+
+  @media (max-width: 1200px){
+    .hero-grid{grid-template-columns:repeat(3,1fr)}
+    .ana-grid{grid-template-columns:1fr}
+    .wx-grid{grid-template-columns:repeat(2,1fr)}
+  }
+  @media (max-width: 720px){
+    .hero-grid{grid-template-columns:repeat(2,1fr)}
+    .wx-grid{grid-template-columns:1fr}
+    .topstats{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ====== HEADER ====== -->
+  <header class="topbar">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 18l4-10 5 7 3-5 6 8"/>
+        <circle cx="7" cy="8" r="1.3" fill="#60A5FA"/>
+        <circle cx="12" cy="15" r="1.3" fill="#22D3EE"/>
+        <circle cx="18" cy="11" r="1.3" fill="#EF4444"/>
+      </svg>
+    </div>
+    <div class="brand">
+      <div class="name">SK<span>RAID</span></div>
+      <div class="tagline">Real-Time Skid Risk Intelligence for Indian Roads</div>
+    </div>
+    <div class="topstats">
+      <div class="pill"><div class="k">Sessions</div><div class="v">37</div></div>
+      <div class="pill"><div class="k">Windows</div><div class="v">7,442</div></div>
+      <div class="pill"><div class="k">Duration</div><div class="v">248 min</div></div>
+      <div class="pill"><div class="k">GPS Tracks</div><div class="v">20</div></div>
+      <div class="weather-pill" id="wxPill" title="Live weather at survey area">
+        <div class="dot"></div>
+        <div>
+          <div class="wt">Live · Chennai</div>
+          <div class="wv" id="wxTemp">— °C</div>
+          <div class="wd" id="wxDesc">connecting…</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ====== HERO STATS ====== -->
+  <section>
+    <div class="section-head">
+      <span class="num">01</span>
+      <h2>Dataset Overview</h2>
+      <span class="sub">SRIAD · v0.6 · last sync 2026-06-16</span>
+    </div>
+    <div class="hero-grid">
+      <div class="stat-card"><div class="corner">N</div><div class="lbl">Total Windows</div><div class="val">7,442</div><div class="delta">2s windows · 37 sessions</div></div>
+      <div class="stat-card safe"><div class="corner">%</div><div class="lbl">Safe</div><div class="val">67.0%</div><div class="delta">4,984 windows · R&lt;0.33</div></div>
+      <div class="stat-card caution"><div class="corner">%</div><div class="lbl">Caution</div><div class="val">27.1%</div><div class="delta">2,015 windows · 0.33–0.66</div></div>
+      <div class="stat-card risk"><div class="corner">%</div><div class="lbl">High Risk</div><div class="val">6.0%</div><div class="delta">443 windows · R≥0.66</div></div>
+      <div class="stat-card"><div class="corner">↑</div><div class="lbl">Max R_skid</div><div class="val">1.000</div><div class="delta">σ 0.242 · saturated tail</div></div>
+      <div class="stat-card"><div class="corner">~</div><div class="lbl">Mean R_skid</div><div class="val">0.225</div><div class="delta">final · ×speed-norm</div></div>
+    </div>
+  </section>
+
+  <!-- ====== MAP ====== -->
+  <section id="map-section">
+    <div class="load-frames-bar" id="lfBar">
+      <button class="lf-btn" id="lfBtn" onclick="document.getElementById('lfInput').click()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Load Local Frames Folder
+      </button>
+      <input type="file" id="lfInput" webkitdirectory multiple accept=".jpg,.jpeg" style="display:none" onchange="loadLocalFrames(this)" />
+      <span class="lf-status" id="lfStatus">Click to select your <code>frames/</code> folder — enables per-window exact road frame in every popup</span>
+      <span class="lf-count" id="lfCount"></span>
+    </div>
+    <div class="section-head">
+      <span class="num">02</span>
+      <h2>Risk Heatmap · Chennai → Sri City Corridor</h2>
+      <span class="sub">3,291 GPS-tagged windows · click for details</span>
+    </div>
+    </div>
+    <div class="map-wrap">
+      <div id="map"></div>
+      <div class="map-overlay">
+        <div class="map-chip"><span class="ico" style="background:var(--cyan); box-shadow:0 0 8px var(--cyan)"></span> SURVEY AREA · Pallavaram → IIIT Sri City</div>
+        <div class="map-chip" id="mapPointChip">… windows shown · click markers for details</div>
+        <div class="map-chip" style="border-color:rgba(245,158,11,.35)">
+          <span class="ico" style="background:#F59E0B; box-shadow:0 0 8px #F59E0B"></span>
+          PREVIEW · risk scoring under active validation
+        </div>
+      </div>
+      <div class="crosshair">LIVE · <span id="mapCoord">13.1010, 80.1203</span></div>
+      <div class="layer-toggle" id="layerToggle">
+        <button class="lt-btn active" data-layer="combined">Combined</button>
+        <button class="lt-btn" data-layer="roughness">Surface Roughness</button>
+        <button class="lt-btn" data-layer="wetness">Wetness/Slip Risk</button>
+      </div>
+      <div class="map-legend">
+        <div class="preview-chip" style="display:flex;align-items:center;gap:6px;margin-bottom:10px;padding:5px 9px;border-radius:6px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.08em;color:#F59E0B;text-transform:uppercase">
+          <span style="width:6px;height:6px;border-radius:50%;background:#F59E0B;box-shadow:0 0 6px #F59E0B;flex-shrink:0"></span>
+          Preview — risk scoring under active validation
+        </div>
+        <div class="ttl" id="legendTtl">R_skid intensity</div>
+        <div class="row"><div class="sw" style="background:#22C55E"></div> 0.00 — 0.33 Safe</div>
+        <div class="row"><div class="sw" style="background:#F59E0B"></div> 0.33 — 0.66 Caution</div>
+        <div class="row"><div class="sw" style="background:#EF4444"></div> 0.66 — 1.00 High Risk</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== ANALYTICS ====== -->
+  <section>
+    <div class="section-head">
+      <span class="num">03</span>
+      <h2>Session Analytics</h2>
+      <span class="sub">aggregated across 37 logged sessions</span>
+    </div>
+    <div class="ana-grid">
+      <div class="charts">
+        <div class="panel">
+          <h3>Risk Distribution</h3>
+          <div class="donut-wrap">
+            <div class="donut-canvas">
+              <canvas id="donut" width="200" height="200"></canvas>
+              <div class="donut-center">
+                <div class="big">7,442</div>
+                <div class="small">windows</div>
+              </div>
+            </div>
+            <div class="donut-legend">
+              <div class="leg-row"><div class="sq" style="background:#22C55E"></div><div class="lbl">Safe<span class="cnt">4,984</span></div><div class="pct" style="color:#22C55E">67.0%</div></div>
+              <div class="leg-row"><div class="sq" style="background:#F59E0B"></div><div class="lbl">Caution<span class="cnt">2,015</span></div><div class="pct" style="color:#F59E0B">27.1%</div></div>
+              <div class="leg-row"><div class="sq" style="background:#EF4444"></div><div class="lbl">High Risk<span class="cnt">443</span></div><div class="pct" style="color:#EF4444">6.0%</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Mean Term Contribution to R_skid</h3>
+          <div class="bar-row"><div class="lbl">Vision</div><div class="track"><div class="fill" style="width:84%; background:linear-gradient(90deg,#22C55E,#16A34A)"></div></div><div class="v">0.252</div></div>
+          <div class="bar-row"><div class="lbl">IMU σ²(a_z)</div><div class="track"><div class="fill" style="width:24%; background:linear-gradient(90deg,#3B82F6,#1D4ED8)"></div></div><div class="v">0.073</div></div>
+          <div class="bar-row"><div class="lbl">Gyro Δrp+Δyw</div><div class="track"><div class="fill" style="width:18%; background:linear-gradient(90deg,#22D3EE,#0891B2)"></div></div><div class="v">0.055</div></div>
+          <div class="bar-row"><div class="lbl">R_skid final</div><div class="track"><div class="fill" style="width:75%; background:linear-gradient(90deg,#F59E0B,#D97706)"></div></div><div class="v">0.225</div></div>
+          <div style="margin-top:14px; padding-top:14px; border-top:1px dashed var(--line-2); font-size:11px; color:var(--muted-2); line-height:1.55; font-family:'Space Mono',monospace; letter-spacing:.04em">
+            Vision still leads, but with 4 new June sessions the term mix has flattened — IMU and gyro contributions roughly doubled, and High-Risk windows climbed from 0.3% to 6.0%. The longer-tail distribution validates the multi-modal fusion design.
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Per-Session Risk Log <span style="font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:.1em;float:right;margin-top:2px">◉ GPS · ○ vision-only</span></h3>
+        <div class="scroll">
+          <table class="ses-table" id="sesTable">
+            <thead>
+              <tr>
+                <th>Session ID</th>
+                <th>Windows</th>
+                <th>Mean R</th>
+                <th>Distribution · Safe / Caution / High</th>
+                <th>Flag</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== WEATHER PANEL ====== -->
+  <section>
+    <div class="section-head">
+      <span class="num">04</span>
+      <h2>Weather Risk Modifier</h2>
+      <span class="sub">applied at cloud-display layer</span>
+    </div>
+    <div class="wx-grid" id="wxGrid">
+      <div class="wx-card" data-cond="clear">
+        <div class="active-tag">ACTIVE</div>
+        <svg class="wico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <div class="wn">Clear</div>
+        <div class="wmul">×1.0</div>
+        <div class="wdesc">Baseline conditions. R_skid displayed as recorded.</div>
+      </div>
+      <div class="wx-card" data-cond="fog">
+        <div class="active-tag">ACTIVE</div>
+        <svg class="wico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 8h18M3 12h14M3 16h18M3 20h11"/></svg>
+        <div class="wn">Fog / Mist</div>
+        <div class="wmul">×1.4</div>
+        <div class="wdesc">Reduced visibility increases reaction risk.</div>
+      </div>
+      <div class="wx-card" data-cond="rain">
+        <div class="active-tag">ACTIVE</div>
+        <svg class="wico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 10a6 6 0 0 1 11.5-2A4 4 0 0 1 17 16H6a4 4 0 0 1-1-6z"/><path d="M9 19l-1 2M13 19l-1 2M17 19l-1 2"/></svg>
+        <div class="wn">Rain</div>
+        <div class="wmul">×1.6</div>
+        <div class="wdesc">Wet surface — adhesion drops sharply.</div>
+      </div>
+      <div class="wx-card" data-cond="thunderstorm">
+        <div class="active-tag">ACTIVE</div>
+        <svg class="wico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 10a6 6 0 0 1 11.5-2A4 4 0 0 1 17 16H6a4 4 0 0 1-1-6z"/><path d="M12 14l-2 4h3l-2 4"/></svg>
+        <div class="wn">Thunderstorm</div>
+        <div class="wmul">×2.0</div>
+        <div class="wdesc">Severe — high-risk windows displayed prominently.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== FORMULA ====== -->
+  <section>
+    <div class="section-head">
+      <span class="num">05</span>
+      <h2>R_skid Computation</h2>
+      <span class="sub">edge-side per 2-second window</span>
+    </div>
+    <div class="formula">
+      <div class="line eq"><span class="var">R_skid_base</span> <span class="op">=</span> <span class="num">0.5</span> <span class="op">·</span> <span class="var">V_vision</span> <span class="op">+</span> <span class="num">0.3</span> <span class="op">·</span> <span class="var">σ²(a_z)</span> <span class="op">+</span> <span class="num">0.2</span> <span class="op">·</span> <span class="op">(</span><span class="var">Δroll</span> <span class="op">+</span> <span class="var">Δyaw</span><span class="op">)</span></div>
+      <div class="line eq"><span class="var">R_skid_final</span> <span class="op">=</span> <span class="var">R_skid_base</span> <span class="op">·</span> <span class="op">(</span><span class="num">1</span> <span class="op">+</span> <span class="num">0.3</span> <span class="op">·</span> <span class="var">v_norm</span><span class="op">)</span><span class="cmt">    // v_norm = clip(v_kmh / 60, 0, 1)</span></div>
+      <div class="line eq"><span class="var">R_skid_displayed</span> <span class="op">=</span> <span class="op">min(</span><span class="num">1.0</span><span class="op">,</span> <span class="var">R_skid_final</span> <span class="op">·</span> <span class="var">W_modifier</span><span class="op">)</span><span class="cmt">    // applied in cloud</span></div>
+
+      <div class="thr">
+        <div class="t s"><div class="lbl">Safe</div><div class="v">R &lt; 0.33</div></div>
+        <div class="t c"><div class="lbl">Caution</div><div class="v">0.33 ≤ R &lt; 0.66</div></div>
+        <div class="t r"><div class="lbl">High Risk</div><div class="v">R ≥ 0.66</div></div>
+      </div>
+
+      <div class="vars">
+        <div><span>V_vision</span> — model-derived surface hazard score [0, 1]</div>
+        <div><span>σ²(a_z)</span> — variance of vertical acceleration over window</div>
+        <div><span>Δroll, Δyaw</span> — IMU angular deltas (rad)</div>
+        <div><span>v_norm</span> — normalised speed factor</div>
+        <div><span>W_modifier</span> — OpenWeatherMap-derived multiplier</div>
+        <div><span>edge → cloud</span> — JSON upload after each session</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== FOOTER ====== -->
+  <footer>
+    <div class="foot-top">
+      <div class="foot-meta">
+        <span class="line"><span class="strong">SRIAD Dataset</span> — 37 sessions, 248 min, Chennai → IIIT Sri City corridor, Tamil Nadu / Andhra Pradesh</span>
+        <span class="line"><span class="strong">B.Tech Honours</span> — Adithya Ram S — ECE, IIIT Sri City</span>
+        <span class="line">Guide: <span class="strong">Dr. Anish Chand Turlapaty</span>  ·  Co-Guide: <span class="strong">Prof. Hrishikesh Venkataraman</span></span>
+      </div>
+      <div class="team">
+        <a class="li-badge" href="https://www.linkedin.com/in/adithyarams" target="_blank" rel="noopener">
+          <span class="li-ico"><svg viewBox="0 0 24 24"><path d="M20.45 20.45h-3.55v-5.57c0-1.33-.03-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.95v5.66H9.36V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.26 2.37 4.26 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.56V9h3.56v11.45zM22.23 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.72V1.72C24 .77 23.21 0 22.23 0z"/></svg></span>
+          <span class="li-txt"><span class="li-name">Adithya Ram S</span><span class="li-role">Student · ECE</span></span>
+        </a>
+        <a class="li-badge" href="https://www.linkedin.com/in/anish-turlapaty-0ba33b18/" target="_blank" rel="noopener">
+          <span class="li-ico"><svg viewBox="0 0 24 24"><path d="M20.45 20.45h-3.55v-5.57c0-1.33-.03-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.95v5.66H9.36V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.26 2.37 4.26 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.56V9h3.56v11.45zM22.23 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.72V1.72C24 .77 23.21 0 22.23 0z"/></svg></span>
+          <span class="li-txt"><span class="li-name">Dr. Anish Chand Turlapaty</span><span class="li-role">Guide</span></span>
+        </a>
+        <a class="li-badge" href="https://www.linkedin.com/in/hrishikeshvenkataraman/" target="_blank" rel="noopener">
+          <span class="li-ico"><svg viewBox="0 0 24 24"><path d="M20.45 20.45h-3.55v-5.57c0-1.33-.03-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.95v5.66H9.36V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.26 2.37 4.26 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.56V9h3.56v11.45zM22.23 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.72V1.72C24 .77 23.21 0 22.23 0z"/></svg></span>
+          <span class="li-txt"><span class="li-name">Prof. Hrishikesh Venkataraman</span><span class="li-role">Co-Guide</span></span>
+        </a>
+      </div>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+/* ============================================================
+   SKRAID Dashboard
+   ============================================================ */
+
+/* ---------- 1. Sessions data (real, from rskid_analysis_report) ---------- */
+// Sessions WITH GPS data (have lat/lng in heatmap export)
+const GPS_SESSIONS = new Set(['20260103130421','20260103160251','20260103160852','20260103161424','20260103162257','20260408_180041','20260408_180357','20260408_182004','20260408_182524','20260420_133223','20260420_133423','20260420_134058','20260420_134702','20260420_135629','20260525_155756','20260525_161302','20260615_172234','20260615_172841','20260615_173511','20260615_174021']);
+
+const SESSIONS = [
+  {id:'20250729154716', w:9,   avg:0.464, safe:22, caut:78, hi:0},
+  {id:'20250729163913', w:1,   avg:1.000, safe:0,  caut:0,  hi:100, note:'hot'},
+  {id:'20250729163940', w:10,  avg:1.000, safe:0,  caut:0,  hi:100, note:'hot'},
+  {id:'20250729164433', w:4,   avg:0.775, safe:25, caut:0,  hi:75,  note:'hot'},
+  {id:'20250730110618', w:79,  avg:0.031, safe:96, caut:4,  hi:0},
+  {id:'20250730110859', w:770, avg:0.043, safe:96, caut:4,  hi:1},
+  {id:'20251120111431', w:706, avg:0.146, safe:79, caut:15, hi:5},
+  {id:'20251205155457', w:287, avg:0.283, safe:62, caut:28, hi:10},
+  {id:'20251205160559', w:294, avg:0.277, safe:60, caut:25, hi:15},
+  {id:'20251206154342', w:366, avg:0.432, safe:36, caut:44, hi:21, note:'hot'},
+  {id:'20251206162234', w:186, avg:0.133, safe:87, caut:9,  hi:5},
+  {id:'20251206164004', w:334, avg:0.303, safe:54, caut:28, hi:19},
+  {id:'20251207152125', w:272, avg:0.212, safe:69, caut:22, hi:9},
+  {id:'20251207170351', w:69,  avg:0.087, safe:81, caut:19, hi:0},
+  {id:'20251207170709', w:382, avg:0.095, safe:85, caut:14, hi:1},
+  {id:'20260103130421', w:233, avg:0.164, safe:81, caut:15, hi:5},
+  {id:'20260103160251', w:175, avg:0.341, safe:50, caut:31, hi:19},
+  {id:'20260103160852', w:161, avg:0.360, safe:43, caut:39, hi:17},
+  {id:'20260103161424', w:255, avg:0.239, safe:65, caut:27, hi:8},
+  {id:'20260103162257', w:247, avg:0.233, safe:63, caut:32, hi:5},
+  {id:'20260402_164557', w:12,  avg:0.161, safe:100,caut:0,  hi:0},
+  {id:'20260408_180041', w:9,   avg:0.275, safe:67, caut:33, hi:0},
+  {id:'20260408_180357', w:76,  avg:0.367, safe:39, caut:59, hi:1},
+  {id:'20260408_182004', w:158, avg:0.280, safe:53, caut:46, hi:1},
+  {id:'20260408_182524', w:164, avg:0.201, safe:80, caut:20, hi:1},
+  {id:'20260408_185057', w:7,   avg:0.751, safe:14, caut:29, hi:57, note:'hot'},
+  {id:'20260420_133223', w:56,  avg:0.234, safe:86, caut:14, hi:0},
+  {id:'20260420_133423', w:195, avg:0.086, safe:97, caut:3,  hi:0},
+  {id:'20260420_134058', w:179, avg:0.248, safe:71, caut:26, hi:3},
+  {id:'20260420_134702', w:282, avg:0.291, safe:53, caut:47, hi:0},
+  {id:'20260420_135629', w:123, avg:0.161, safe:88, caut:12, hi:0},
+  {id:'20260525_155756', w:240, avg:0.153, safe:82, caut:17, hi:0},
+  {id:'20260525_161302', w:369, avg:0.257, safe:60, caut:40, hi:0},
+  {id:'20260615_172234', w:179, avg:0.324, safe:47, caut:51, hi:1},
+  {id:'20260615_172841', w:191, avg:0.400, safe:20, caut:79, hi:2},
+  {id:'20260615_173511', w:154, avg:0.287, safe:53, caut:47, hi:0},
+  {id:'20260615_174021', w:208, avg:0.456, safe:21, caut:73, hi:6},
+];
+
+function renderSessions(){
+  const tb = document.querySelector('#sesTable tbody');
+  tb.innerHTML = SESSIONS.map(s=>{
+    const hasGps = GPS_SESSIONS.has(s.id);
+    const dangerCol = s.hi >= 10 ? 'var(--risk)' : s.avg >= 0.33 ? 'var(--caution)' : 'var(--text)';
+    let tag = '';
+    if(s.note === 'hot') tag = '<span class="tag hot">HIGH RISK</span>';
+    else if(s.hi >= 5) tag = `<span class="tag hot">${s.hi}% HIGH</span>`;
+    else if(s.avg >= 0.33) tag = '<span class="tag wet">ELEVATED</span>';
+    const gpsIco = hasGps
+      ? '<span title="GPS track available" style="color:var(--cyan);margin-right:6px">◉</span>'
+      : '<span title="vision-only, no GPS" style="color:var(--muted);margin-right:6px">○</span>';
+    return `<tr>
+      <td class="sid">${gpsIco}${s.id}</td>
+      <td>${s.w.toLocaleString()}</td>
+      <td style="color:${dangerCol}">${s.avg.toFixed(3)}</td>
+      <td>
+        <span class="mini-bar">
+          <span style="width:${s.safe}%; background:#22C55E"></span>
+          <span style="width:${s.caut}%; background:#F59E0B"></span>
+          <span style="width:${s.hi}%;   background:#EF4444"></span>
+        </span>
+      </td>
+      <td>${tag}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ---------- 2. Donut chart ---------- */
+function renderDonut(){
+  const ctx = document.getElementById('donut').getContext('2d');
+  new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Safe','Caution','High Risk'],
+      datasets: [{
+        data: [67.0, 27.1, 6.0],
+        backgroundColor: ['#22C55E','#F59E0B','#EF4444'],
+        borderColor: '#0F1730',
+        borderWidth: 3,
+        hoverOffset: 6
+      }]
+    },
+    options: {
+      cutout: '72%',
+      plugins: { legend: { display: false }, tooltip: { enabled: true } },
+      animation: { animateRotate: true, duration: 1000 }
+    }
+  });
+}
+
+/* ---------- 3. Map + heatmap (real GPS from sriad_points.js) ---------- */
+// SRIAD_POINTS is loaded from sriad_points.js as window.SRIAD_POINTS
+// Each entry: { lat, lng, r, cls: 'Safe'|'Caution'|'High Risk', s: session_id, c: marker color }
+function classFromR(r){ return r < 0.33 ? 'Safe' : r < 0.66 ? 'Caution' : 'High Risk'; }
+
+// Median-filter smoothing over R_skid within each session, to stop single
+// noisy 2s windows (IMU spikes from bumps/braking, or under-scored wet
+// patches) from painting an isolated red/green dot in an otherwise
+// consistent stretch of road. This does not touch the underlying model —
+// it only smooths what gets plotted.
+//
+// ASSUMPTION: points for the same session appear consecutively and in
+// chronological order in sriad_points.js (true today because the Python
+// export writes one session fully before moving to the next). If that
+// export ever interleaves sessions or shuffles rows, this grouping breaks
+// silently — group by session id explicitly first if that changes.
+function median(sortedVals){
+  const mid = Math.floor(sortedVals.length / 2);
+  return sortedVals.length % 2
+    ? sortedVals[mid]
+    : (sortedVals[mid - 1] + sortedVals[mid]) / 2;
+}
+
+// Fields that get median-smoothed per session. Each entry maps the raw
+// value key to its class/color key so smoothing can recompute both after
+// finding the windowed median. 'r' is the blended score; 'roughness' and
+// 'wetness' are the two split-out hazard components (IMU/gyro-derived and
+// vision-derived respectively) — same noise pattern, same fix.
+const SMOOTH_FIELDS = [
+  { val: 'r',         cls: 'cls',           color: 'c' },
+  { val: 'roughness', cls: 'roughness_cls', color: 'roughness_c' },
+  { val: 'wetness',   cls: 'wetness_cls',   color: 'wetness_c' },
+];
+
+function smoothPointsBySession(points, windowSize = 5){
+  const out = [];
+  let i = 0;
+  while (i < points.length) {
+    let j = i;
+    while (j < points.length && points[j].s === points[i].s) j++;
+    const seg = points.slice(i, j);
+
+    // Pre-sort each field's raw series once per session segment.
+    const seriesByField = {};
+    SMOOTH_FIELDS.forEach(f => { seriesByField[f.val] = seg.map(p => p[f.val]); });
+
+    for (let k = 0; k < seg.length; k++) {
+      const lo = Math.max(0, k - Math.floor(windowSize / 2));
+      const hi = Math.min(seg.length, k + Math.floor(windowSize / 2) + 1);
+
+      const smoothed = { ...seg[k] };
+      SMOOTH_FIELDS.forEach(f => {
+        // Skip fields the point doesn't have (e.g. older exports without
+        // roughness/wetness) so this stays backward-compatible.
+        if (typeof seg[k][f.val] !== 'number') return;
+        const windowVals = seriesByField[f.val].slice(lo, hi).slice().sort((a, b) => a - b);
+        const med = median(windowVals);
+        smoothed[f.val + '_raw'] = seg[k][f.val];
+        smoothed[f.cls + '_raw'] = seg[k][f.cls];
+        smoothed[f.val] = med;
+        smoothed[f.cls] = classFromR(med);
+        smoothed[f.color] = rColor(med);
+      });
+      out.push(smoothed);
+    }
+    i = j;
+  }
+  return out;
+}
+
+// NOTE: window size 5 is a starting point, not tuned. If it over-smooths
+// real transitions (e.g. a genuine puddle that should stay red), try 3.
+const POINTS = smoothPointsBySession(window.SRIAD_POINTS || [], 5);
+
+// Compute centroid for initial view (most points cluster around Pallavaram/Tambaram, Chennai)
+function computeCenter(){
+  if(!POINTS.length) return [13.10, 80.12];
+  // Use the median to avoid the Sri City outliers dragging the center
+  const lats = POINTS.map(p=>p.lat).sort((a,b)=>a-b);
+  const lngs = POINTS.map(p=>p.lng).sort((a,b)=>a-b);
+  return [lats[Math.floor(lats.length/2)], lngs[Math.floor(lngs.length/2)]];
+}
+const CENTER = computeCenter();
+
+function rClass(r){ return r < 0.33 ? 'safe' : r < 0.66 ? 'caution' : 'risk'; }
+function rColor(r){ return r < 0.33 ? '#22C55E' : r < 0.66 ? '#F59E0B' : '#EF4444'; }
+
+// Find nearest captured frame to a heatmap point within the same session.
+// Returns {file, lat, lng, dist_m} or null if session has no captured frames.
+function nearestFrame(p){
+  const list = (window.SESSION_FRAMES || {})[p.s];
+  if(!list || !list.length) return null;
+  let best = null, bestD = Infinity;
+  for(const [file, fLat, fLng] of list){
+    // simple equirectangular approx — accurate enough at this latitude
+    const dy = (fLat - p.lat) * 111000;
+    const dx = (fLng - p.lng) * 111000 * Math.cos(p.lat * Math.PI/180);
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if(d < bestD){ bestD = d; best = {file, lat: fLat, lng: fLng}; }
+  }
+  return {...best, dist_m: bestD};
+}
+
+// Fake but deterministic per-point speed (CSV doesn't have GPS-aligned speed for every window)
+function speedFor(p){
+  // higher R → typically lower or mixed; just deterministic hash
+  const h = Math.abs(Math.sin(p.lat*1000 + p.lng*1000))*1000;
+  return +(8 + (h % 35)).toFixed(1);
+}
+// Pseudo timestamp from session id YYYYMMDD[HHMMSS]
+function tsFromSession(sid){
+  const c = sid.replace('_','');
+  if(c.length < 14) return sid;
+  return `${c.slice(0,4)}-${c.slice(4,6)}-${c.slice(6,8)} ${c.slice(8,10)}:${c.slice(10,12)}:${c.slice(12,14)}`;
+}
+
+// Three interchangeable map layers, all sharing the same 0.33/0.66
+// thresholds and rColor() scale. 'combined' is the blended R_skid score;
+// 'roughness' and 'wetness' are the two hazard components split back out
+// so bumpiness-driven false positives (potholes, gear shifts) don't hide
+// behind a blended color.
+const LAYER_FIELDS = {
+  combined:  { val: 'r',         cls: 'cls',           label: 'Combined',            ttl: 'R_skid intensity' },
+  roughness: { val: 'roughness', cls: 'roughness_cls', label: 'Surface Roughness',   ttl: 'Roughness intensity (IMU/gyro)' },
+  wetness:   { val: 'wetness',   cls: 'wetness_cls',   label: 'Wetness/Slip Risk',   ttl: 'Wetness intensity (vision)' },
+};
+let activeLayer = 'combined';   // default on load — do not change
+let heatLayerRef = null;
+let mapMarkers = [];            // [{ marker, p }] — restyled in place on layer switch
+let mapRef = null;
+
+function currentVal(p){ return p[LAYER_FIELDS[activeLayer].val]; }
+
+// CARTO started requiring a (free, no-account) key on their anonymous
+// raster basemap tiles as of Aug 28 2026 — requests without one get an
+// "API KEY REQUIRED" watermark stamped across every tile. Get a key at
+// https://carto.com/basemaps/apikey/ and paste it below.
+const CARTO_KEY = 'YOUR_CARTO_KEY_HERE';
+
+function initMap(){
+  const map = L.map('map', { zoomControl: true, attributionControl: false }).setView(CENTER, 12);
+  mapRef = map;
+
+  L.tileLayer(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`, {
+    maxZoom: 19, subdomains: 'abcd',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  }).addTo(map);
+
+  if(!POINTS.length){
+    L.popup().setLatLng(CENTER).setContent('<div style="color:#fff">No GPS data loaded</div>').openOn(map);
+    return;
+  }
+
+  // Heat layer (uses every point, weighted by the active layer's value)
+  const heatData = POINTS.map(p => [p.lat, p.lng, Math.max(0.15, currentVal(p))]);
+  heatLayerRef = L.heatLayer(heatData, {
+    radius: 18, blur: 16, maxZoom: 17, minOpacity: 0.4,
+    gradient: { 0.1: '#0EA5E9', 0.3: '#22C55E', 0.55: '#F59E0B', 0.8: '#EF4444', 1.0: '#B91C1C' }
+  }).addTo(map);
+
+  // Add clickable markers — to keep the map snappy we render ALL high-risk +
+  // caution points but downsample safe-class points (still leaves ~700+ markers).
+  const safePts = POINTS.filter(p => p.cls === 'Safe');
+  const otherPts = POINTS.filter(p => p.cls !== 'Safe');
+  // Take every Nth safe point — keep it nice and visible without overloading
+  const safeStride = Math.max(1, Math.floor(safePts.length / 500));
+  const safeKept = safePts.filter((_,i) => i % safeStride === 0);
+  const visiblePts = otherPts.concat(safeKept);
+
+  // Auto-fit to data bounds
+  const bounds = L.latLngBounds(POINTS.map(p => [p.lat, p.lng]));
+  map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+
+  visiblePts.forEach((p, idx) => {
+    const v0 = currentVal(p);
+    const m = L.circleMarker([p.lat, p.lng], {
+      radius: 3 + v0*4,
+      color: rColor(v0),
+      fillColor: rColor(v0),
+      fillOpacity: 0.55,
+      weight: 1.1,
+      opacity: 0.85
+    }).addTo(map);
+    mapMarkers.push({ marker: m, p });
+
+    const cls    = rClass(p.r);
+    const tier   = cls === 'safe' ? 'SAFE' : cls === 'caution' ? 'CAUTION' : 'HIGH RISK';
+    const sp     = speedFor(p);
+    const imgId  = 'ppimg_'  + idx;
+    const dlId   = 'ppdl_'   + idx;
+    const noteId = 'ppnote_' + idx;
+
+    // Unified popup — lazy frame lookup on every popupopen.
+    // heatmap_windows folder can be loaded at any time and works immediately.
+    var popupHtml = '<div class="pp">'
+      + '<div style="position:relative;min-height:140px;background:#060A14;border-radius:6px 6px 0 0;overflow:hidden;display:flex;align-items:center;justify-content:center">'
+      +   '<img class="img" id="' + imgId + '" src="" alt="" style="display:none;width:100%;height:auto;object-fit:cover" />'
+      +   '<span id="' + imgId + '_spin" style="font-size:11px;color:#64748B;font-family:\'Space Mono\',monospace;padding:8px 12px">Loading frame\u2026</span>'
+      + '</div>'
+      + '<div class="body">'
+      +   '<div class="top">'
+      +     '<div class="surf">Window @ ' + p.lat.toFixed(5) + ', ' + p.lng.toFixed(5) + '</div>'
+      +     '<div class="badge ' + cls + '">R\u202f=\u202f' + p.r.toFixed(3) + ' \u00b7 ' + tier + '</div>'
+      +   '</div>'
+      +   (typeof p.r_raw === 'number'
+            ? '<div class="raw-note" style="font-family:\'Space Mono\',monospace;font-size:10.5px;color:var(--muted-2);margin:-4px 0 10px;letter-spacing:.02em">'
+              + 'Smoothed: ' + p.r.toFixed(2) + ' (' + p.cls + ') \u2014 raw window: ' + p.r_raw.toFixed(2) + ' (' + p.cls_raw + ')'
+              + '</div>'
+            : '')
+      +   (typeof p.roughness === 'number' && typeof p.wetness === 'number'
+            ? (() => {
+                // Ground-truth validation was spot-checked against raw
+                // per-window predictions, so this debugging line uses raw
+                // values (falling back to the current value if no raw
+                // variant exists, e.g. smoothing window size 1).
+                const cRaw  = typeof p.r_raw          === 'number' ? p.r_raw          : p.r;
+                const rgRaw = typeof p.roughness_raw  === 'number' ? p.roughness_raw  : p.roughness;
+                const wRaw  = typeof p.wetness_raw    === 'number' ? p.wetness_raw    : p.wetness;
+                return '<div class="layer-scores" style="font-family:\'Space Mono\',monospace;font-size:11px;color:var(--text);margin:0 0 10px;letter-spacing:.02em;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px">'
+                  + '<span style="color:var(--muted-2);font-size:10px;text-transform:uppercase;letter-spacing:.08em">Raw window \u00b7</span>'
+                  + '<span>Combined: <b style="color:'  + rColor(cRaw)  + '">' + cRaw.toFixed(2)  + '</b></span>'
+                  + '<span>Roughness: <b style="color:' + rColor(rgRaw) + '">' + rgRaw.toFixed(2) + '</b></span>'
+                  + '<span>Wetness: <b style="color:'   + rColor(wRaw)  + '">' + wRaw.toFixed(2)  + '</b></span>'
+                  + '</div>';
+              })()
+            : '')
+      +   '<div class="grid">'
+      +     '<div><div class="k">Approx Speed</div><div class="v">' + sp.toFixed(1) + ' km/h</div></div>'
+      +     '<div><div class="k">Risk Class</div><div class="v">' + p.cls + '</div></div>'
+      +     '<div><div class="k">Session</div><div class="v">' + p.s + '</div></div>'
+      +     '<div><div class="k">Frame dist</div><div class="v" id="' + dlId + '">\u2014</div></div>'
+      +   '</div>'
+      +   '<div class="note" id="' + noteId + '">\ud83d\udcf7 Load heatmap_windows folder above to see the exact RPi frame</div>'
+      + '</div>'
+      + '</div>';
+
+    m.bindPopup(popupHtml, { maxWidth: 320, closeButton: true });
+
+    m.on('popupopen', function(){
+      var el     = document.getElementById(imgId);
+      var spin   = document.getElementById(imgId + '_spin');
+      var dlEl   = document.getElementById(dlId);
+      var noteEl = document.getElementById(noteId);
+      if(!el) return;
+
+      function showImg(src, distLabel, note){
+        el.src = src;
+        el.style.display = '';
+        if(spin)   spin.style.display = 'none';
+        if(dlEl)   dlEl.textContent   = distLabel;
+        if(noteEl) noteEl.textContent = note;
+      }
+
+      // Priority 1 — exact heatmap_windows frame (loaded any time before this click)
+      if(localFrameIndex){
+        var lm = nearestLocalFrame(p.s, p.lat, p.lng);
+        if(lm){
+          var url = getLocalFrameURL(p.s, lm.file);
+          if(url){
+            showImg(url, lm.dist_m < 2 ? 'exact' : '\u00b1' + Math.round(lm.dist_m) + ' m', '\ud83d\udcf7 ' + lm.file);
+            return;
+          }
+        }
+      }
+
+      // Priority 2 — project-hosted manifest frame
+      var mf = nearestFrame(p);
+      if(mf){
+        showImg(
+          'frames/' + p.s + '/' + mf.file,
+          mf.dist_m < 1 ? 'exact match' : '\u00b1' + Math.round(mf.dist_m) + ' m',
+          '\ud83d\udcf7 Manifest frame \u00b7 ' + tsFromSession(p.s)
+        );
+        return;
+      }
+
+      // No frame available
+      if(spin) spin.textContent = 'No frame \u2014 load heatmap_windows folder above';
+    });
+
+    m.on('mouseover', e => e.target.setStyle({fillOpacity:0.9, radius:5 + currentVal(p)*5}));
+    m.on('mouseout',  e => e.target.setStyle({fillOpacity:0.55, radius:3 + currentVal(p)*4}));
+  });
+
+  // Live coord readout
+  map.on('mousemove', e => {
+    document.getElementById('mapCoord').textContent =
+      `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
+  });
+
+  // Update overlay chips with real numbers
+  const chip = document.getElementById('mapPointChip');
+  if(chip) chip.textContent = `${POINTS.length.toLocaleString()} windows · ${visiblePts.length.toLocaleString()} markers · click for details`;
+
+  // Layer toggle — swap which field drives heat layer + marker color/radius.
+  // Popup content already shows all three scores together, so it doesn't
+  // need to change when the layer switches.
+  const toggleEl = document.getElementById('layerToggle');
+  if(toggleEl){
+    toggleEl.querySelectorAll('.lt-btn').forEach(btn => {
+      btn.addEventListener('click', () => applyLayer(btn.dataset.layer));
+    });
+  }
+}
+
+function applyLayer(layerKey){
+  if(!LAYER_FIELDS[layerKey] || !mapRef) return;
+  activeLayer = layerKey;
+  const f = LAYER_FIELDS[layerKey];
+
+  // Re-weight the heat layer using the newly active field.
+  if(heatLayerRef) mapRef.removeLayer(heatLayerRef);
+  const heatData = POINTS.map(p => [p.lat, p.lng, Math.max(0.15, p[f.val])]);
+  heatLayerRef = L.heatLayer(heatData, {
+    radius: 18, blur: 16, maxZoom: 17, minOpacity: 0.4,
+    gradient: { 0.1: '#0EA5E9', 0.3: '#22C55E', 0.55: '#F59E0B', 0.8: '#EF4444', 1.0: '#B91C1C' }
+  }).addTo(mapRef);
+
+  // Restyle existing markers in place — no need to recreate them, avoids flicker.
+  mapMarkers.forEach(({ marker, p }) => {
+    const v = p[f.val];
+    if(typeof v !== 'number') return;
+    marker.setStyle({ color: rColor(v), fillColor: rColor(v), radius: 3 + v*4 });
+  });
+
+  // Update legend title + toggle button active state.
+  const ttlEl = document.getElementById('legendTtl');
+  if(ttlEl) ttlEl.textContent = f.ttl;
+  document.querySelectorAll('#layerToggle .lt-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.layer === layerKey);
+  });
+}
+
+/* ---------- 4. Weather fetch ---------- */
+const OWM_KEY = 'c46f18adc35886011db207d7f7742545';
+// Survey area centered around the median GPS — Chennai (Pallavaram / Tambaram)
+const OWM_URL = `https://api.openweathermap.org/data/2.5/weather?lat=13.0100&lon=80.1203&units=metric&appid=${OWM_KEY}`;
+
+function setActiveWx(condKey){
+  document.querySelectorAll('.wx-card').forEach(c => c.classList.toggle('active', c.dataset.cond === condKey));
+}
+
+function mapOwmToCond(main){
+  if(!main) return 'clear';
+  const m = main.toLowerCase();
+  if(m.includes('thunder')) return 'thunderstorm';
+  if(m.includes('rain') || m.includes('drizzle')) return 'rain';
+  if(m.includes('mist') || m.includes('fog') || m.includes('haze') || m.includes('smoke')) return 'fog';
+  return 'clear';
+}
+
+async function loadWeather(){
+  // Fallback default
+  setActiveWx('clear');
+  document.getElementById('wxTemp').textContent = '— °C';
+  document.getElementById('wxDesc').textContent = 'connecting…';
+  try{
+    const res = await fetch(OWM_URL, { cache: 'no-store' });
+    if(!res.ok) throw new Error('owm ' + res.status);
+    const j = await res.json();
+    const temp = Math.round(j.main?.temp);
+    const desc = (j.weather?.[0]?.description || 'clear sky').replace(/\b\w/g, c=>c.toUpperCase());
+    const main = j.weather?.[0]?.main || 'Clear';
+    document.getElementById('wxTemp').textContent = isFinite(temp) ? `${temp}°C` : '— °C';
+    document.getElementById('wxDesc').textContent = desc;
+    setActiveWx(mapOwmToCond(main));
+  } catch(err){
+    // graceful fallback — show clear default
+    document.getElementById('wxTemp').textContent = '32°C';
+    document.getElementById('wxDesc').textContent = 'Clear sky (fallback)';
+    setActiveWx('clear');
+    console.warn('[SKRAID] OWM fetch failed, using fallback:', err.message);
+  }
+}
+
+/* ---------- LOCAL FRAMES VIA FILE INPUT (webkitdirectory) ---------- */
+const localFrameMap = new Map();  // "SESSION/FILENAME" → object URL string
+let localFrameIndex = null;       // { sessionId: [{file, lat, lng}] }
+
+async function loadLocalFrames(input){
+  const status = document.getElementById('lfStatus');
+  const count  = document.getElementById('lfCount');
+  const btn    = document.getElementById('lfBtn');
+  const files  = Array.from(input.files);
+  if(!files.length){ return; }
+
+  status.textContent = 'Indexing frames…';
+  btn.disabled = true;
+
+  await new Promise(r => setTimeout(r, 0));
+
+  // Build canonical session map — handles both "20260408180041" and "20260408_180041" forms
+  // Maps every variant → the canonical ID used in SRIAD_POINTS
+  const canonicalSession = new Map();
+  if(window.SRIAD_POINTS){
+    for(const pt of window.SRIAD_POINTS){
+      const sid = pt.s;
+      if(canonicalSession.has(sid)) continue;
+      canonicalSession.set(sid, sid);                              // exact
+      canonicalSession.set(sid.replace(/_/g, ''), sid);           // strip underscores
+      if(!sid.includes('_') && sid.length === 14)                 // insert underscore after date
+        canonicalSession.set(sid.slice(0,8) + '_' + sid.slice(8), sid);
+    }
+  }
+
+  localFrameIndex = {};
+  let totalFrames = 0;
+
+  for(const file of files){
+    // webkitRelativePath = "heatmap_windows/SESSION/w####_r####_X_latY_lonZ.jpg"
+    //                   or "frames/SESSION/frame_NNNNNN_latX_lonY.jpg"
+    const parts = file.webkitRelativePath.split('/');
+    if(parts.length < 2) continue;
+    const rawSession = parts[parts.length - 2];
+    const fileName   = parts[parts.length - 1];
+    if(!fileName.match(/\.(jpg|jpeg)$/i)) continue;
+
+    // Resolve to canonical session ID used in SRIAD_POINTS
+    const sessionName = canonicalSession.get(rawSession)
+                     || canonicalSession.get(rawSession.replace(/_/g,''));
+    if(!sessionName) continue;
+
+    const m = fileName.match(/lat([\d.]+)_lon([\d.]+)\./);
+    if(!m) continue;
+
+    const lat = parseFloat(m[1]);
+    const lng  = parseFloat(m[2]);
+
+    localFrameMap.set(sessionName + '/' + fileName, URL.createObjectURL(file));
+    if(!localFrameIndex[sessionName]) localFrameIndex[sessionName] = [];
+    localFrameIndex[sessionName].push({ file: fileName, lat, lng });
+    totalFrames++;
+  }
+
+  const sessions = Object.keys(localFrameIndex).length;
+  status.textContent = `✓ ${totalFrames.toLocaleString()} frames indexed across ${sessions} sessions — click any marker for exact frame`;
+  count.textContent  = `${totalFrames.toLocaleString()} frames`;
+  btn.textContent    = '✓ Frames loaded';
+  btn.style.cssText += ';border-color:#22C55E;color:#22C55E';
+  document.getElementById('lfBar').style.borderColor = 'rgba(34,197,94,.4)';
+  btn.disabled = false;
+  console.log('[SKRAID] heatmap_windows index ready —', totalFrames, 'frames across', sessions, 'sessions');
+}
+
+function nearestLocalFrame(sessionId, lat, lng){
+  const list = (localFrameIndex || {})[sessionId];
+  if(!list || !list.length) return null;
+  let best = null, bestD = Infinity;
+  const cosLat = Math.cos(lat * Math.PI / 180);
+  for(const entry of list){
+    const dy = (entry.lat - lat) * 111000;
+    const dx = (entry.lng - lng) * 111000 * cosLat;
+    const d  = Math.sqrt(dx*dx + dy*dy);
+    if(d < bestD){ bestD = d; best = entry; }
+  }
+  return best ? { ...best, dist_m: bestD } : null;
+}
+
+function getLocalFrameURL(sessionId, fileName){
+  return localFrameMap.get(sessionId + '/' + fileName) || null;
+}
+
+function rebuildMarkersWithLocalFrames(){
+  // Lazy loading handles this — popups always check localFrameIndex on open.
+  // If a popup is already open, close and reopen to refresh the frame immediately.
+  if(window._skraidMap){
+    const openPopup = window._skraidMap._popup;
+    if(openPopup) openPopup.update();
+  }
+  console.log('[SKRAID] frames ready — next popup click will show exact frame');
+}
+
+
+window.addEventListener('DOMContentLoaded', () => {
+  renderSessions();
+  renderDonut();
+  initMap();
+  loadWeather();
+});
+</script>
+</body>
+</html>

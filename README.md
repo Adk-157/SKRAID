@@ -48,6 +48,20 @@ never fills a window. Use `benchmark_skraid_pi4.py` for measurement and
 offline scoring. Real-time alerting is scoped future work (see
 [Known Design Decisions](#known-design-decisions)).
 
+**Pi 4 vs. Pi 5, measured.** The same ROI-scale ablation was repeated on a
+Raspberry Pi 5 against the same holdout session:
+
+| ROI scale | Pi 4 | Pi 5 | Pi 5 vs. 2 s budget |
+|---|---|---|---|
+| `s=1.0` (full) | 70.05 s | 37.76 s | 18.9× over |
+| `s=0.5` | 22.05 s | 12.12 s | 6.1× over |
+| `s=0.25` | 11.92 s | 6.84 s | 3.4× over |
+
+Pi 5 is consistently 1.74–1.86× faster at every scale, but its best
+configuration is still 3.4× over budget. A full hardware-generation upgrade
+closes less than half the gap — confirming the bottleneck is the
+feature-extraction *algorithm class*, not the CPU generation.
+
 ---
 
 ## R_skid Formula
@@ -76,6 +90,19 @@ thresholds.
 - IMU/gyro → **per-session** min-max (mounting bias makes global unfair;
   `ACCEL_Z_VAR` spans 0.00006–17585 across sessions).
 - No-IMU sessions (21% of windows) → vision-only score, rescaled to [0,1].
+
+**Why these weights (0.5 / 0.3 / 0.2)?** Set from exploratory analysis of
+each term's mean contribution to the score (vision 0.259, IMU 0.089, gyro
+0.087 — vision dominates), rather than by formal optimisation. This
+ordering (vision > IMU > gyro) is preserved by the chosen weights while
+damping vision's raw dominance. **The score is not sensitive to the exact
+values**: perturbing each weight by ±0.05 and renormalising (27
+combinations) changes the risk class for at most 5.1% of windows (mean
+2.1%), with r ≥ 0.994 against the baseline score; even equal (1/3, 1/3,
+1/3) weights agree with the chosen weighting on 88.3% of assignments
+(r = 0.960). It's the *ordering* of the terms, not their precise values,
+that carries the score. A systematic sensitivity analysis over the full
+weight simplex remains future work.
 
 **Vision term — `V_vision = max(wet, rough, mud)`**
 
@@ -150,6 +177,11 @@ SKRAID/
 Raw data (videos, fusion CSVs) is **not** in this repo. Contact the Smart
 Transportation Research Group at IIIT Sri City for access.
 
+**GPS coverage.** Of the 42 sessions, 26 carry usable GPS. 39 sessions were
+inventoried with GPS assessment (26 usable); the three August-2026
+forward-holdout sessions used for classifier evaluation lost GPS fix
+entirely while retaining valid IMU and camera data.
+
 ### Sensor CSV formats (3 generations)
 
 `normalize_columns()` (Cell 3) unifies all three:
@@ -204,17 +236,130 @@ the same way, which points at data scarcity (531 High-Risk windows are only
 Accuracy near 0.80 alongside 0.00–0.20 recall is majority-class accuracy and
 is not a meaningful headline metric.
 
+**Training details.** All architectures use `class_weight='balanced'` to
+counter the 6.2% minority class (Gaussian NB excepted, as it admits no such
+parameter). The reference RandomForest and Extra Trees use 200 estimators
+at `max_depth=12`; the decision tree uses `max_depth=8`; LightGBM uses 200
+estimators at `max_depth=8`. The threshold sweep spans 0.10–0.30.
+
+**The collapse is not a sampling artefact of the holdout.** All nine
+low-frame-rate sessions (see Limitations below) fall in the *training*
+split; the three holdout sessions were captured at full 30 fps, so the
+holdout features are free of that confound. The degradation occurs on
+clean test data — any frame-rate artefact acts on the training side (24.8%
+of training High-Risk windows), which would depress learned quality rather
+than inflate the measured CV-to-holdout gap.
+
 ### Independent ground-truth check
 
 54 spot-check windows labelled **cold** against raw video (no model output
 shown):
 
-| Comparison | Agreement with rider |
-|---|---|
-| `R_skid` formula vs. human | 42.6% |
-| Trained RF (`t=0.15`) vs. human | 40.7% |
+| Comparison | Agreement with rider | Cohen's κ |
+|---|---|---|
+| `R_skid` formula vs. human | 42.6% | +0.067 |
+| Trained RF (`t=0.15`) vs. human | 40.7% | +0.040 |
 
 1 of 4 rider-confirmed High-Risk moments was caught. Reported as-is.
+
+**Raw agreement overstates this.** Chance agreement alone is ≈0.38 on this
+Safe-skewed three-class distribution, so both κ values are effectively
+chance-level. The RF's confusion matrix is near row-identical to the
+formula's, meaning the model stays bound to formula-derived label quality
+rather than learning an independently better signal. Because neither the
+score nor the video label is anchored to an actual friction measurement,
+this near-zero κ shows the two *disagree* — it doesn't say which one is
+closer to true traction. Resolving that needs an instrumented reference
+(friction wheel or tyre-mounted sensing); we didn't have one for this
+study. The result agrees in direction with the forward-holdout finding, so
+two independent checks now concur that High-Risk detection is unresolved
+at current data volume.
+
+---
+
+## Novelty & Positioning
+
+SKRAID targets **skid risk**, not surface *type* — and reports the deployed
+cost of doing so measured stage-by-stage on the target edge hardware,
+rather than as model inference alone. Three things distinguish it from
+prior work:
+
+1. **Continuous, annotation-free score.** `R_skid` is computed directly
+   from sensor statistics, so risk classes emerge from the score rather
+   than from a human labelling surfaces — avoiding the annotation
+   bottleneck that ties vision-only classifiers to pre-existing labelled
+   corpora.
+2. **Two-wheeler-specific sensing.** Roll and yaw rates enter the score as
+   primary safety-relevant states, not suspension-damped disturbances the
+   way they'd be treated on a four-wheeler.
+3. **Indian road conditions.** The platform targets wet films, loose
+   gravel, mud, and broken tar — conditions for which no annotated corpus
+   exists — and contributes SRIAD to address that gap.
+
+None of the surveyed literature (below) reports deployed latency broken
+down by pipeline stage, nor validates against independent human judgement;
+SKRAID addresses both.
+
+## Contributions
+
+1. **SRIAD**: 42 sessions / 8,546 windows / 285 min of synchronised
+   camera + IMU + GPS data from real Indian road riding.
+2. An **annotation-free continuous skid-risk score** (`R_skid`) fusing
+   vision and inertial features over 2 s windows, GPS-tagged to road
+   segments.
+3. **Independent rider-confirmed ground-truth validation** on
+   cold-labelled spot-check windows.
+4. An **EKF over latent log-odds risk** providing bias-free, chatter-free
+   temporal smoothing at negligible edge cost.
+5. **Per-stage Pi 4 latency measurements** that localise the bottleneck,
+   with implications for how edge-ADAS latency should be reported.
+6. A **negative finding on cross-session generalisation** of discrete
+   hazard classification, replicated across five model families.
+
+## Related Work
+
+- **Vision-based surface classification.** Venancio et al. benchmark five
+  CNNs for 27-class road-surface classification on a Pi 4 for electric
+  motorcycles (88.9% top-1 at 0.46 s/frame). Camera-only, and reliant on a
+  960k-image annotated dataset that doesn't exist for Indian two-wheeler
+  skid conditions.
+- **IMU/vibration-based detection.** Mednis et al. detect potholes from
+  Android accelerometer thresholds (~90% true-positive); Nericell monitors
+  road and traffic conditions from smartphone sensors; Ikeda and Inoue
+  report 86.6% within-subject but only 41.0% cross-subject accuracy — a
+  generalisation gap analogous to ours. All lack visual context: an IMU
+  can't perceive a wet patch before the wheel reaches it. Cui et al. apply
+  random decision forests to pavement distress imagery, evaluated offline.
+- **Multi-sensor fusion.** Ishizuki et al. fuse camera imagery with
+  tire-mounted accelerometer and temperature features, improving on
+  image-only classification but requiring instrumented tires and speeds
+  above 30 km/h; Chu and Wu fuse roadside CCTV, weather, and tire-noise
+  sensors. Both find vision weakest on wet surfaces, motivating SKRAID's
+  inertial term.
+
+See [References](#references) for full citations.
+
+## Limitations
+
+- **Not real-time as measured** — the system is a post-ride mapping tool,
+  not an in-the-moment alert.
+- **No friction ground truth**: `R_skid` is a proxy validated only by
+  rider agreement and construct separability. Single vehicle, single
+  rider, single region. GPS coverage on 26 of 42 sessions. Two night
+  sessions excluded as outside the vision pipeline's operating envelope.
+- `VIBRATION_ENERGY` and `ROUGHNESS_INDEX_IMU` use summation over the
+  window, so their value scales with sample count (~35–45 at 20 Hz), an
+  uncorrected sensitivity.
+- Rider ground-truth sample is small (n=54, of which 4 High-Risk).
+- **Frame rate is not uniform across the collection window**: nine of 42
+  sessions (before a camera configuration change) pool only 5–10 frames
+  per 2 s window against 120 for the majority — a 24× spread, at which
+  dense optical flow's small-displacement assumption is violated at riding
+  speed, and `p10`/`p90` pooling has little statistical basis. These
+  sessions contribute 24.3% of all High-Risk windows, including the two
+  most extreme (100% High-Risk) sessions — a possible confound between
+  frame-rate artefact and hazard label that has not been isolated from
+  genuine surface signal.
 
 ---
 
@@ -304,12 +449,24 @@ space with a logistic measurement model — nonlinear, hence *extended*.
 Measurement noise adapts per window from RandomForest tree disagreement,
 and hysteresis (dual thresholds + minimum hold) prevents alarm chatter.
 
+**EKF validation results.** The stage was validated in simulation before
+deployment: unbiased step response, a single spurious impulse bounded to
+four alarm steps, and zero alarm chatter when the score oscillates about
+the threshold (the failure mode a fixed threshold exhibits). Measured cost
+is ~50–100 ms per window, negligible beside the vision stage, so the layer
+transfers unchanged to any future backend.
+
 **Path to real-time (future work).**
 Not a scale parameter — an architectural change. Either replace dense
 Farnebäck flow with sparse Lucas–Kanade tracking over a bounded set of
 corner features, or replace the six classical passes with a single
 lightweight learned forward pass. Both require feature re-extraction and
 retraining, with the accuracy cost *measured*, not assumed.
+
+**Other directions.** Collecting more High-Risk exposure across varied
+conditions to close the CV-to-holdout gap, and crowd-sourced aggregation
+across multiple riders to build hazard maps denser than any single rider
+can produce.
 
 ---
 
@@ -321,6 +478,37 @@ retraining, with the accuracy cost *measured*, not assumed.
 | Guide | Dr. Anish Chand Turlapaty |
 | Co-Guide | Prof. Hrishikesh Venkataraman |
 | Institution | IIIT Sri City, Chittoor, Andhra Pradesh |
+
+## Acknowledgement
+
+The authors acknowledge the UKIERI-funded DIGIT Project (UK–India
+Education and Research Initiative).
+
+## References
+
+1. R. Venancio et al., "Advanced driving assistance integration in electric
+   motorcycles: road surface classification with a focus on gravel
+   detection using deep learning," *Front. Artif. Intell.*, vol. 8, art.
+   1520557, 2025.
+2. A. Mednis et al., "Real time pothole detection using Android
+   smartphones with accelerometers," in *Proc. DCOSS*, 2011, pp. 1–6.
+3. P. Mohan, V. N. Padmanabhan, and R. Ramjee, "Nericell: rich monitoring
+   of road and traffic conditions using mobile smartphones," in *Proc. ACM
+   SenSys*, 2008, pp. 323–336.
+4. L. Cui et al., "Pavement distress detection using random decision
+   forests," in *Proc. ICDS*, LNCS vol. 9208, Springer, 2015, pp. 95–102.
+5. Y. Ikeda and M. Inoue, "An estimation of road surface conditions using
+   participatory sensing," in *Proc. IEEE GCCE*, 2017.
+6. M. Ishizuki et al., "Image and CAIS features-based estimation of road
+   surface condition on winter local road," *Proc. IEEE GCCE*, 2022,
+   pp. 79–80.
+7. X. Chu and Y. Wu, "Low cost road condition recognition based on
+   roadside multi-sensors," *Proc. APCIP*, 2009, pp. 173–176.
+8. S. M. Najib et al., "Road hazard detection for the motorcycle based on
+   EfficientNet-Lite0," *Proc. IEEE ISCAIE*, 2023, pp. 101–105.
+9. H. Venkataraman et al., "STRC@IIITS Driving Dataset for India (SIDDI),"
+   STRG, IIIT Sri City, 2019–.
+10. MoRTH, Govt. of India, "Road Accidents in India 2023," 2025.
 
 ---
 

@@ -114,6 +114,10 @@ worst wins.
 
 ```
 SKRAID/
+├── dashboard/
+│   ├── SKRAID_Dashboard.html      ← Public-facing risk map dashboard (open in browser)
+│   └── sriad_points.js            ← Per-window GPS + risk score data, loaded by the dashboard
+│
 ├── pi/
 │   ├── collect_data.py            ← Data collection (runs on Pi)
 │   ├── benchmark_skraid_pi4.py    ← Offline latency benchmark + scoring
@@ -214,7 +218,33 @@ shown):
 
 ---
 
-## Quick Start (Pi)
+## Dashboard
+
+`dashboard/SKRAID_Dashboard.html` is a self-contained, static risk map —
+no server or build step needed. Open it directly in a browser.
+
+It reads `sriad_points.js` (same folder) for every 2-second window's GPS
+location, `R_skid` score, and risk class, and renders them as a heatmap and
+clickable markers over the survey area (Pallavaram → IIIT Sri City).
+
+**Seeing the actual road frame per point.** The dashboard doesn't ship with
+the raw camera frames — they're too large for the repo. To see the actual
+road image for any GPS-tagged point (potholes, wet patches, gravel, etc. as
+the camera saw them):
+
+1. Download the frames from Google Drive:
+   [SKRAID captured frames](https://drive.google.com/drive/folders/1fjKn_jYO7Kz_EYQ7D9UqHm6ZXt0AZ62w?usp=sharing)
+2. Open `SKRAID_Dashboard.html` in your browser.
+3. Click **"Load Local Frames Folder"** near the top of the map and select
+   the folder you just downloaded.
+4. Click any marker on the map — its popup will now show the exact frame
+   captured at that point, alongside its `R_skid` score and breakdown.
+
+Frames are matched to markers by session and GPS coordinates, entirely in
+the browser — nothing is uploaded anywhere. If you skip this step, popups
+still work and show all scores, just without the frame image.
+
+---
 
 ```bash
 git clone https://github.com/Adk-157/SKRAID.git
